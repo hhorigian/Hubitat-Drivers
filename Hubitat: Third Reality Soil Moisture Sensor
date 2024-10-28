@@ -1,12 +1,12 @@
 /**
- *  Hubitat: Third Reality Soil Moisture Sensor
+ *  Third Reality Soil Moisture Sensor
  *
  *  Author: Echistas
  *  Date: 2023-10-21
  */
 
 metadata {
-    definition(name: "Third Reality Soil Moisture Sensor", Echistas: "Echistas", author: "Echistas") {
+    definition(name: "Third Reality Soil Moisture Sensor", namespace: "Echistas", author: "YourName") {
         capability "Battery"
         capability "Temperature Measurement"
         capability "Refresh"
