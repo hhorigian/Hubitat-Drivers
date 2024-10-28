@@ -6,7 +6,7 @@
  */
 
 metadata {
-    definition(name: "Third Reality Soil Moisture Sensor", Echistas: "yourNamespace", author: "Echistas") {
+    definition(name: "Third Reality Soil Moisture Sensor", Echistas: "Echistas", author: "Echistas") {
         capability "Battery"
         capability "Temperature Measurement"
         capability "Refresh"
