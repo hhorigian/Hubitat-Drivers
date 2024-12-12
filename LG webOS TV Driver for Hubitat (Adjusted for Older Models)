@@ -1,0 +1,285 @@
+/**
+
+LG webOS TV Driver for Hubitat (Adjusted for Older Models)
+Author: Echistas
+Date: 2023-10-21
+This driver allows Hubitat to control an LG webOS TV.
+Adjusted to support older LG TV models using secure WebSocket connections.
+*/
+import groovy.json.JsonSlurper
+import groovy.json.JsonBuilder
+
+metadata {
+definition(name: "LG webOS TV (Older Models)", namespace: "Echistas", author: "Echistas") {
+capability "Switch"
+capability "AudioVolume"
+capability "Refresh"
+capability "Actuator"
+capability "Media Input Source"
+capability "Initialize"
+
+    attribute "channel", "string"
+    attribute "mediaInputSource", "string"
+    attribute "mute", "string"
+    attribute "volume", "number"
+
+    // Explicitly declare the initialize command
+    command "initialize"
+    command "launchApp", [[name: "App Id*", type: "STRING", description: "App ID to launch"]]
+    command "sendButton", [[name: "Button Name*", type: "STRING", description: "Button name to send"]]
+    command "channelUp"
+    command "channelDown"
+    command "mute"
+    command "unmute"
+    command "volumeUp"
+    command "volumeDown"
+}
+
+preferences {
+    input name: "tvIp", type: "text", title: "TV IP Address", description: "Enter your TV's IP address", defaultValue: "192.168.1.1", required: true
+    input name: "tvMac", type: "text", title: "TV MAC Address", description: "Enter your TV's MAC address", defaultValue: "00:00:00:00:00:00", required: true
+    input name: "pairingKey", type: "text", title: "Pairing Key", description: "Leave blank initially", required: false
+    input name: "debugLogging", type: "bool", title: "Enable Debug Logging", defaultValue: true
+}
+}
+
+def installed() {
+log.info "LG webOS TV driver installed."
+initialize()
+}
+
+def updated() {
+log.info "LG webOS TV driver updated."
+initialize()
+}
+
+def initialize() {
+if (debugLogging) {
+log.debug "Debug logging is enabled."
+runIn(1800, logsOff) // Disable debug logging after 30 minutes
+}
+connect()
+}
+
+def logsOff() {
+log.warn "Debug logging disabled."
+device.updateSetting("debugLogging", [value: "false", type: "bool"])
+}
+
+def connect() {
+if (debugLogging) log.debug "Connecting to TV at ${tvIp}"
+try {
+interfaces.webSocket.close()
+} catch (e) {
+if (debugLogging) log.debug "No existing WebSocket to close."
+}
+interfaces.webSocket.connect("wss://${tvIp}:3001/", pingInterval: 30, headers: ["Content-Type": "application/json"], ignoreSSLIssues: true)
+}
+
+def webSocketStatus(String status) {
+if (debugLogging) log.debug "WebSocket status: ${status}"
+if (status.startsWith("failure:")) {
+log.error "WebSocket failure: ${status}"
+reconnectWebSocket()
+} else if (status == "status: open") {
+if (debugLogging) log.debug "WebSocket is open."
+startPairing()
+} else if (status == "status: closing") {
+if (debugLogging) log.debug "WebSocket is closing."
+} else {
+log.warn "Unknown WebSocket status: ${status}"
+}
+}
+
+def reconnectWebSocket() {
+if (debugLogging) log.debug "Attempting to reconnect WebSocket..."
+runIn(5, connect) // Try to reconnect after 5 seconds
+}
+
+def parse(String message) {
+if (debugLogging) log.debug "Received message: ${message}"
+def jsonSlurper = new JsonSlurper()
+def msg = jsonSlurper.parseText(message)
+if (msg.type == "registered") {
+pairingKey = msg.payload["client-key"]
+device.updateSetting("pairingKey", [value: pairingKey, type: "text"])
+log.info "Pairing successful. Client Key saved."
+} else if (msg.type == "response") {
+// Handle responses to commands
+} else if (msg.type == "error") {
+log.error "Error from TV: ${msg.error}"
+} else {
+if (debugLogging) log.debug "Unhandled message type: ${msg.type}"
+}
+}
+
+def startPairing() {
+if (debugLogging) log.debug "Starting pairing process..."
+def payload = [
+type : "register",
+id : "register_0",
+payload: [
+"client-key": pairingKey ?: "",
+"manifest" : [
+"manifestVersion": 1,
+"appVersion" : "1.1",
+"signed" : [
+"created" : "20140509",
+"appId" : "com.lge.test",
+"vendorId" : "com.lge",
+"localizedAppNames": [
+"" : "LG Remote App",
+"ko-KR" : "리모컨 앱",
+"zxx-XX" : "ЛГ Rэмotэ AПП"
+],
+"localizedVendorNames": [
+"" : "LG Electronics"
+],
+"permissions": [
+"TEST_SECURE",
+"CONTROL_INPUT_TEXT",
+"CONTROL_MOUSE_AND_KEYBOARD",
+"READ_INSTALLED_APPS",
+"READ_LGE_SDX",
+"READ_NOTIFICATIONS",
+"SEARCH",
+"WRITE_SETTINGS",
+"WRITE_NOTIFICATION_ALERT",
+"CONTROL_POWER",
+"READ_CURRENT_CHANNEL",
+"READ_RUNNING_APPS",
+"READ_UPDATE_INFO",
+"UPDATE_FROM_REMOTE_APP",
+"READ_LGE_TV_INPUT_EVENTS",
+"READ_TV_CURRENT_TIME"
+],
+"serial": "2f930e2d2cfe083771f68e4fe7bb07"
+],
+"permissions": [
+"LAUNCH",
+"LAUNCH_WEBAPP",
+"APP_TO_APP",
+"CLOSE",
+"TEST_OPEN",
+"TEST_PROTECTED",
+"CONTROL_AUDIO",
+"CONTROL_DISPLAY",
+"CONTROL_INPUT_JOYSTICK",
+"CONTROL_INPUT_MEDIA_RECORDING",
+"CONTROL_INPUT_MEDIA_PLAYBACK",
+"CONTROL_INPUT_TV",
+"CONTROL_POWER",
+"READ_APP_STATUS",
+"READ_CURRENT_CHANNEL",
+"READ_INPUT_DEVICE_LIST",
+"READ_NETWORK_STATE",
+"READ_RUNNING_APPS",
+"READ_TV_CHANNEL_LIST",
+"WRITE_NOTIFICATION_TOAST",
+"READ_POWER_STATE",
+"READ_COUNTRY_INFO"
+]
+]
+]
+]
+sendWebSocketMessage(payload)
+}
+
+def on() {
+if (debugLogging) log.debug "Turning on TV."
+sendWakeOnLan()
+runIn(5, connect) // Attempt to connect after 5 seconds
+sendEvent(name: "switch", value: "on")
+}
+
+def off() {
+if (debugLogging) log.debug "Turning off TV."
+sendCommand("ssap://system/turnOff")
+sendEvent(name: "switch", value: "off")
+}
+
+def sendCommand(uri, payload = null) {
+def message = [
+type : "request",
+uri : uri,
+id : "req_${now()}",
+payload: payload ?: [:]
+]
+sendWebSocketMessage(message)
+}
+
+def sendWebSocketMessage(message) {
+def jsonMessage = new JsonBuilder(message).toString()
+if (debugLogging) log.debug "Sending message: ${jsonMessage}"
+interfaces.webSocket.sendMessage(jsonMessage)
+}
+
+def setVolume(volume) {
+if (debugLogging) log.debug "Setting volume to ${volume}"
+sendCommand("ssap://audio/setVolume", [volume: volume.toString()])
+sendEvent(name: "volume", value: volume)
+}
+
+def volumeUp() {
+if (debugLogging) log.debug "Increasing volume."
+sendCommand("ssap://audio/volumeUp")
+}
+
+def volumeDown() {
+if (debugLogging) log.debug "Decreasing volume."
+sendCommand("ssap://audio/volumeDown")
+}
+
+def mute() {
+if (debugLogging) log.debug "Muting audio."
+sendCommand("ssap://audio/setMute", [mute: true])
+sendEvent(name: "mute", value: "muted")
+}
+
+def unmute() {
+if (debugLogging) log.debug "Unmuting audio."
+sendCommand("ssap://audio/setMute", [mute: false])
+sendEvent(name: "mute", value: "unmuted")
+}
+
+def setInputSource(source) {
+if (debugLogging) log.debug "Setting input source to ${source}"
+sendCommand("ssap://tv/switchInput", [inputId: source])
+sendEvent(name: "mediaInputSource", value: source)
+}
+
+def launchApp(appId) {
+if (debugLogging) log.debug "Launching app with ID ${appId}"
+sendCommand("ssap://system.launcher/launch", [id: appId])
+}
+
+def channelUp() {
+if (debugLogging) log.debug "Channel up."
+sendCommand("ssap://tv/channelUp")
+}
+
+def channelDown() {
+if (debugLogging) log.debug "Channel down."
+sendCommand("ssap://tv/channelDown")
+}
+
+def refresh() {
+if (debugLogging) log.debug "Refreshing TV status."
+// Implement status refresh logic here if needed
+}
+
+def sendButton(buttonName) {
+if (debugLogging) log.debug "Sending button command: ${buttonName}"
+sendCommand("ssap://input/generateKey", [name: buttonName])
+}
+
+def sendWakeOnLan() {
+if (debugLogging) log.debug "Sending Wake-on-LAN packet to MAC: ${tvMac}"
+def macFormatted = tvMac.replaceAll(":", "").toUpperCase()
+def result = new hubitat.device.HubAction(
+"wake on lan ${macFormatted}",
+hubitat.device.Protocol.LAN,
+null
+)
+sendHubCommand(result)
+}
