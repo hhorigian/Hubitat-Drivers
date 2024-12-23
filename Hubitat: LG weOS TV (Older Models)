@@ -5,6 +5,7 @@ Author: Echistas
 Date: 2023-10-21
 This driver allows Hubitat to control an LG webOS TV.
 Adjusted to support older LG TV models using secure WebSocket connections.
+
 */
 import groovy.json.JsonSlurper
 import groovy.json.JsonBuilder
